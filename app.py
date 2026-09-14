@@ -5,7 +5,7 @@ import streamlit as st
 import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 # -----------------------------
 # Configuración
@@ -457,10 +457,13 @@ def fila_cita(row, cliente_id, clientes, citas_cliente, catalogo):
         with col_fecha:
             st.write(row.Fecha.strftime("%d/%m/%Y") if pd.notna(row.Fecha) else "—")
         with col_texto:
-            texto = row.Tratamientos
+            tratamientos_fila = citas_cliente.loc[
+                citas_cliente["ID"] == row.ID, "Tratamiento"
+            ].tolist()
+            texto = "\n".join(f"- {t}" for t in tratamientos_fila)
             if row.Observaciones:
-                texto += f"  \n📝 {row.Observaciones}"
-            st.write(texto)
+                texto += f"\n\n📝 {row.Observaciones}"
+            st.markdown(texto)
         with col_total:
             st.write(f"**{formatear_clp(row.Total)}**")
         with col_acciones:
@@ -624,7 +627,7 @@ def ficha_cliente(cliente_id, clientes, citas):
 
 
 def pagina_clientes():
-    st.title("🧑 Clientes")
+    st.title("🧑 Clientes y Citas Pasadas")
     clientes = cargar_clientes()
     citas = cargar_citas()
 
@@ -636,6 +639,12 @@ def pagina_clientes():
         if clientes.empty:
             st.info("Todavía no hay clientes registrados.")
             return
+
+        ids_validos = clientes["ID"].tolist()
+        cliente_id_actual = st.session_state.get("cliente_activo")
+        if cliente_id_actual not in ids_validos:
+            cliente_id_actual = ids_validos[0]
+            st.session_state["cliente_activo"] = cliente_id_actual
 
         st.text_input("🔍 Buscar por nombre o RUT", key="busqueda_cliente")
         busqueda = st.session_state.get("busqueda_cliente", "").strip().lower()
@@ -664,26 +673,31 @@ def pagina_clientes():
             ],
         })
 
+        st.caption("Seleccioná un cliente para ver el detalle e historial de citas.")
+
         if tabla_lista.empty:
             st.caption("Sin resultados para esa búsqueda.")
         else:
+            filas_coincidentes = clientes_filtrados.index[
+                clientes_filtrados["ID"] == cliente_id_actual
+            ].tolist()
+            selection_default = (
+                {"selection": {"rows": [filas_coincidentes[0]]}} if filas_coincidentes else None
+            )
+
             evento = st.dataframe(
                 tabla_lista,
                 use_container_width=True,
                 hide_index=True,
                 on_select="rerun",
                 selection_mode="single-row",
+                selection_default=selection_default,
                 key="tabla_clientes_sel",
             )
             filas_sel = evento.selection.rows if evento and evento.selection else []
             if filas_sel:
-                st.session_state["cliente_activo"] = clientes_filtrados.iloc[filas_sel[0]]["ID"]
-
-    ids_validos = clientes["ID"].tolist()
-    cliente_id_actual = st.session_state.get("cliente_activo")
-    if cliente_id_actual not in ids_validos:
-        cliente_id_actual = ids_validos[0]
-        st.session_state["cliente_activo"] = cliente_id_actual
+                cliente_id_actual = clientes_filtrados.iloc[filas_sel[0]]["ID"]
+                st.session_state["cliente_activo"] = cliente_id_actual
 
     with col_detalle:
         ficha_cliente(cliente_id_actual, clientes, citas)
@@ -845,23 +859,64 @@ def render_kpis():
     citas = cargar_citas()
     clientes = cargar_clientes()
 
-    hoy = pd.Timestamp(date.today())
-    citas_hoy = citas[citas["Fecha"] == hoy] if not citas.empty else citas
-    n_citas_hoy = citas_hoy["ID"].nunique() if not citas_hoy.empty else 0
-    ingresos_hoy = citas_hoy["Precio"].sum() if not citas_hoy.empty else 0
+    col_kpis, col_filtro = st.columns([3, 1])
+    with col_filtro:
+        periodo_kpi = st.segmented_control(
+            "Período de los KPI",
+            ["Semana", "Mes"],
+            default="Semana",
+            key="periodo_kpi",
+            label_visibility="collapsed",
+        ) or "Semana"
 
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Citas hoy", n_citas_hoy)
-    col2.metric("Ingresos hoy", formatear_clp(ingresos_hoy))
-    col3.metric("Clientes", len(clientes))
+    hoy = date.today()
+    if periodo_kpi == "Mes":
+        inicio = hoy.replace(day=1)
+        fin = (
+            date(hoy.year, 12, 31) if hoy.month == 12
+            else date(hoy.year, hoy.month + 1, 1) - timedelta(days=1)
+        )
+        etiqueta = "este mes"
+    else:
+        inicio = hoy - timedelta(days=hoy.weekday())
+        fin = inicio + timedelta(days=6)
+        etiqueta = "esta semana"
+
+    inicio_ts, fin_ts = pd.Timestamp(inicio), pd.Timestamp(fin)
+
+    if not citas.empty:
+        citas_periodo = citas[(citas["Fecha"] >= inicio_ts) & (citas["Fecha"] <= fin_ts)]
+    else:
+        citas_periodo = citas
+    n_citas_periodo = citas_periodo["ID"].nunique() if not citas_periodo.empty else 0
+    ingresos_periodo = citas_periodo["Precio"].sum() if not citas_periodo.empty else 0
+
+    if not clientes.empty:
+        fechas_registro = clientes["FechaRegistro"].apply(parsear_fecha)
+        clientes_nuevos_periodo = fechas_registro.apply(
+            lambda f: f is not None and inicio <= f <= fin
+        ).sum()
+    else:
+        clientes_nuevos_periodo = 0
+
+    with col_kpis:
+        col1, col2, col3 = st.columns(3)
+        col1.metric(f"Citas {etiqueta}", n_citas_periodo)
+        col2.metric(f"Ingresos {etiqueta}", formatear_clp(ingresos_periodo))
+        col3.metric(f"Clientes nuevos {etiqueta}", clientes_nuevos_periodo)
     st.divider()
 
 
 # -----------------------------
 # Navegación
 # -----------------------------
+st.logo("🦷", size="large")
+
+with st.sidebar:
+    st.caption("Registro de Tratamientos")
+
 pagina = st.navigation([
-    st.Page(pagina_clientes, title="Clientes", icon="🧑", default=True),
+    st.Page(pagina_clientes, title="Clientes y Citas Pasadas", icon="🧑", default=True),
     st.Page(pagina_nueva_cita, title="Nueva cita", icon="➕"),
     st.Page(pagina_resumen, title="Resumen", icon="📊"),
 ])
