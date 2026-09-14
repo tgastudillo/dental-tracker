@@ -1,0 +1,6 @@
+.streamlit/secrets.toml
+.streamlit/*.json
+__pycache__/
+*.pyc
+.venv/
+streamlit_run.log
