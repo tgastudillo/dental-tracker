@@ -301,7 +301,7 @@ def actualizar_cita(cita_id, fecha, cliente_id, items, observaciones):
 # -----------------------------
 # Widget reutilizable: carrito de tratamientos
 # -----------------------------
-def render_carrito(catalogo, carrito_key):
+def render_carrito_agregar(catalogo, carrito_key):
     if carrito_key not in st.session_state:
         st.session_state[carrito_key] = []
 
@@ -326,7 +326,9 @@ def render_carrito(catalogo, carrito_key):
             )
             st.rerun()
 
-    if not st.session_state[carrito_key]:
+
+def render_carrito_tabla(carrito_key):
+    if not st.session_state.get(carrito_key):
         st.info("Todavía no agregaste tratamientos.")
         return None
 
@@ -361,166 +363,337 @@ def render_carrito(catalogo, carrito_key):
     return carrito_df
 
 
+def render_carrito(catalogo, carrito_key):
+    render_carrito_agregar(catalogo, carrito_key)
+    return render_carrito_tabla(carrito_key)
+
+
 # -----------------------------
-# UI
+# Página: Clientes (buscar/crear/editar/eliminar + historial de citas)
 # -----------------------------
-st.title("🦷 Registro de Tratamientos")
-
-tab_clientes, tab_registro, tab_resumen, tab_ficha_cliente = st.tabs(
-    ["🧑 Nuevo cliente", "➕ Nueva cita", "📊 Resumen", "📋 Ficha de cliente"]
-)
-
-# --- TAB 1: registro y edición de clientes ---
-with tab_clientes:
-    if "mensaje_cliente_guardado" not in st.session_state:
-        st.session_state.mensaje_cliente_guardado = None
-
-    st.subheader("Registrar nuevo cliente")
-
-    with st.form("form_cliente", clear_on_submit=True):
-        col1, col2 = st.columns(2)
-        with col1:
-            nombre_cliente = st.text_input("Nombre completo")
-            rut_cliente = st.text_input("RUT", placeholder="12345678-9")
-            telefono_cliente = st.text_input("Teléfono")
-        with col2:
-            email_cliente = st.text_input("Email")
-            direccion_cliente = st.text_input("Dirección")
-
-        st.write("Fecha de nacimiento")
-        fecha_nacimiento = selector_fecha_nacimiento("nac_nuevo")
-
-        notas_cliente = st.text_area("Notas (alergias, antecedentes médicos, etc.)")
-
-        enviado_cliente = st.form_submit_button("Guardar cliente")
-
-        if enviado_cliente:
-            if not nombre_cliente.strip():
-                st.error("Falta el nombre del cliente.")
-            elif not rut_cliente.strip():
-                st.error("Falta el RUT del cliente.")
-            else:
-                guardar_cliente(
-                    nombre_cliente.strip(),
-                    formatear_rut(rut_cliente),
-                    telefono_cliente.strip(),
-                    email_cliente.strip(),
-                    fecha_nacimiento,
-                    direccion_cliente.strip(),
-                    notas_cliente.strip(),
-                )
-                st.cache_data.clear()
-                st.session_state.mensaje_cliente_guardado = (
-                    f"Cliente guardado: {nombre_cliente.strip()}"
-                )
-                st.rerun()
-
-    if st.session_state.mensaje_cliente_guardado:
-        st.success(st.session_state.mensaje_cliente_guardado)
-        st.session_state.mensaje_cliente_guardado = None
-
-    st.divider()
-    st.subheader("Editar cliente existente")
-    clientes_editar = cargar_clientes()
-    if clientes_editar.empty:
-        st.info("Todavía no hay clientes para editar.")
-    else:
-        opciones_editar = {
-            row.ID: f"{row.Nombre} ({row.RUT})" for row in clientes_editar.itertuples()
-        }
-        limpiar_seleccion_invalida("cliente_id_editar", list(opciones_editar.keys()))
-        cliente_id_editar = st.selectbox(
-            "Elegí un cliente",
-            options=list(opciones_editar.keys()),
-            format_func=lambda cid: opciones_editar[cid],
-            key="cliente_id_editar",
-        )
-        datos = clientes_editar.loc[clientes_editar["ID"] == cliente_id_editar].iloc[0]
-
-        with st.form(f"form_editar_cliente_{cliente_id_editar}"):
+def formulario_nuevo_cliente():
+    with st.expander("➕ Nuevo cliente"):
+        with st.form("form_cliente", clear_on_submit=True):
             col1, col2 = st.columns(2)
             with col1:
-                nombre_e = st.text_input("Nombre completo", value=datos["Nombre"])
-                rut_e = st.text_input("RUT", value=datos["RUT"])
-                telefono_e = st.text_input("Teléfono", value=datos["Telefono"])
+                nombre_cliente = st.text_input("Nombre completo")
+                rut_cliente = st.text_input("RUT", placeholder="12345678-9")
+                telefono_cliente = st.text_input("Teléfono")
             with col2:
-                email_e = st.text_input("Email", value=datos["Email"])
-                direccion_e = st.text_input("Dirección", value=datos["Direccion"])
+                email_cliente = st.text_input("Email")
+                direccion_cliente = st.text_input("Dirección")
 
             st.write("Fecha de nacimiento")
-            fecha_nacimiento_e = selector_fecha_nacimiento(
-                f"nac_editar_{cliente_id_editar}",
-                valor_actual=parsear_fecha(datos["FechaNacimiento"]),
-            )
-            notas_e = st.text_area("Notas", value=datos["Notas"])
+            fecha_nacimiento = selector_fecha_nacimiento("nac_nuevo")
+            notas_cliente = st.text_area("Notas (alergias, antecedentes médicos, etc.)")
 
-            if st.form_submit_button("Guardar cambios"):
-                if not nombre_e.strip():
+            if st.form_submit_button("Guardar cliente"):
+                if not nombre_cliente.strip():
                     st.error("Falta el nombre del cliente.")
+                elif not rut_cliente.strip():
+                    st.error("Falta el RUT del cliente.")
                 else:
-                    actualizar_cliente(
-                        cliente_id_editar,
-                        nombre_e.strip(),
-                        formatear_rut(rut_e),
-                        telefono_e.strip(),
-                        email_e.strip(),
-                        fecha_nacimiento_e,
-                        direccion_e.strip(),
-                        notas_e.strip(),
+                    guardar_cliente(
+                        nombre_cliente.strip(),
+                        formatear_rut(rut_cliente),
+                        telefono_cliente.strip(),
+                        email_cliente.strip(),
+                        fecha_nacimiento,
+                        direccion_cliente.strip(),
+                        notas_cliente.strip(),
                     )
                     st.cache_data.clear()
-                    st.success("Cliente actualizado.")
+                    st.success(f"Cliente guardado: {nombre_cliente.strip()}")
                     st.rerun()
 
-        confirmar_key = f"confirmar_eliminar_cliente_{cliente_id_editar}"
-        if confirmar_key not in st.session_state:
-            st.session_state[confirmar_key] = False
 
-        if not st.session_state[confirmar_key]:
-            if st.button("🗑️ Eliminar cliente", key=f"btn_eliminar_cliente_{cliente_id_editar}"):
-                st.session_state[confirmar_key] = True
-                st.rerun()
-        else:
-            citas_todas = cargar_citas()
-            n_citas = 0
-            if not citas_todas.empty:
-                n_citas = citas_todas.loc[
-                    citas_todas["ClienteID"] == cliente_id_editar, "ID"
-                ].nunique()
+def formulario_editar_cliente(cliente_id, info):
+    with st.form(f"form_editar_cliente_{cliente_id}"):
+        col1, col2 = st.columns(2)
+        with col1:
+            nombre_e = st.text_input("Nombre completo", value=info["Nombre"])
+            rut_e = st.text_input("RUT", value=info["RUT"])
+            telefono_e = st.text_input("Teléfono", value=info["Telefono"])
+        with col2:
+            email_e = st.text_input("Email", value=info["Email"])
+            direccion_e = st.text_input("Dirección", value=info["Direccion"])
 
-            aviso = f"¿Seguro que querés eliminar a **{datos['Nombre']}**? Esta acción no se puede deshacer."
-            if n_citas:
-                aviso += (
-                    f" Tiene {n_citas} cita(s) registrada(s); van a quedar "
-                    "como \"cliente desconocido\" en los reportes."
+        st.write("Fecha de nacimiento")
+        fecha_nacimiento_e = selector_fecha_nacimiento(
+            f"nac_editar_{cliente_id}", valor_actual=parsear_fecha(info["FechaNacimiento"])
+        )
+        notas_e = st.text_area("Notas", value=info["Notas"])
+
+        col_guardar, col_cancelar = st.columns(2)
+        with col_guardar:
+            guardar = st.form_submit_button("💾 Guardar cambios", type="primary")
+        with col_cancelar:
+            cancelar = st.form_submit_button("Cancelar")
+
+        if guardar:
+            if not nombre_e.strip():
+                st.error("Falta el nombre del cliente.")
+            else:
+                actualizar_cliente(
+                    cliente_id, nombre_e.strip(), formatear_rut(rut_e),
+                    telefono_e.strip(), email_e.strip(), fecha_nacimiento_e,
+                    direccion_e.strip(), notas_e.strip(),
                 )
-            st.warning(aviso)
-            col_si, col_no = st.columns(2)
-            with col_si:
-                if st.button(
-                    "Sí, eliminar definitivamente",
-                    key=f"btn_confirmar_eliminar_cliente_{cliente_id_editar}",
+                st.cache_data.clear()
+                st.session_state["editando_cliente_id"] = None
+                st.success("Cliente actualizado.")
+                st.rerun()
+        if cancelar:
+            st.session_state["editando_cliente_id"] = None
+            st.rerun()
+
+
+def fila_cita(row, cliente_id, clientes, citas_cliente, catalogo):
+    editando = st.session_state.get("editando_cita_id") == row.ID
+    confirmar_key = f"confirmar_eliminar_cita_{row.ID}"
+
+    with st.container(border=True):
+        col_fecha, col_texto, col_total, col_acciones = st.columns([1.1, 3, 1.2, 1.4])
+        with col_fecha:
+            st.write(row.Fecha.strftime("%d/%m/%Y") if pd.notna(row.Fecha) else "—")
+        with col_texto:
+            texto = row.Tratamientos
+            if row.Observaciones:
+                texto += f"  \n📝 {row.Observaciones}"
+            st.write(texto)
+        with col_total:
+            st.write(f"**{formatear_clp(row.Total)}**")
+        with col_acciones:
+            b1, b2 = st.columns(2)
+            with b1:
+                if not editando and st.button("✏️", key=f"editar_cita_{row.ID}", help="Editar cita"):
+                    st.session_state["editando_cita_id"] = row.ID
+                    st.session_state["carrito_edicion"] = citas_cliente.loc[
+                        citas_cliente["ID"] == row.ID, ["Tratamiento", "Precio"]
+                    ].to_dict("records")
+                    st.rerun()
+            with b2:
+                if not editando and not st.session_state.get(confirmar_key) and st.button(
+                    "🗑️", key=f"eliminar_cita_{row.ID}", help="Eliminar cita"
                 ):
-                    eliminar_cliente(cliente_id_editar)
+                    st.session_state[confirmar_key] = True
+                    st.rerun()
+
+        if st.session_state.get(confirmar_key):
+            st.warning("¿Eliminar esta cita completa? No se puede deshacer.")
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("Sí, eliminar", key=f"si_eliminar_cita_{row.ID}"):
+                    eliminar_cita(row.ID)
                     st.cache_data.clear()
                     st.session_state[confirmar_key] = False
-                    st.success("Cliente eliminado.")
+                    st.success("Cita eliminada.")
                     st.rerun()
-            with col_no:
-                if st.button("Cancelar", key=f"btn_cancelar_eliminar_cliente_{cliente_id_editar}"):
+            with c2:
+                if st.button("Cancelar", key=f"no_eliminar_cita_{row.ID}"):
                     st.session_state[confirmar_key] = False
                     st.rerun()
 
-    st.divider()
-    st.subheader("Clientes registrados")
-    clientes_tabla = cargar_clientes()
-    if clientes_tabla.empty:
-        st.info("Todavía no hay clientes registrados.")
-    else:
-        st.dataframe(clientes_tabla, use_container_width=True, hide_index=True)
+        if editando:
+            st.write("**Editar cita**")
+            col_f, col_c = st.columns(2)
+            with col_f:
+                fecha_edit = st.date_input(
+                    "Fecha",
+                    value=row.Fecha.date() if pd.notna(row.Fecha) else date.today(),
+                    key=f"fecha_edit_{row.ID}",
+                )
+            with col_c:
+                ids_cliente_todos = clientes["ID"].tolist()
+                limpiar_seleccion_invalida(f"cliente_edit_{row.ID}", ids_cliente_todos)
+                cliente_edit_id = st.selectbox(
+                    "Cliente",
+                    options=ids_cliente_todos,
+                    format_func=lambda cid: (
+                        f"{clientes.loc[clientes['ID'] == cid, 'Nombre'].iloc[0]} "
+                        f"({clientes.loc[clientes['ID'] == cid, 'RUT'].iloc[0]})"
+                    ),
+                    index=ids_cliente_todos.index(cliente_id) if cliente_id in ids_cliente_todos else 0,
+                    key=f"cliente_edit_{row.ID}",
+                )
 
-# --- TAB 2: registro de nueva cita ---
-with tab_registro:
+            carrito_edit_df = render_carrito(catalogo, "carrito_edicion")
+            observaciones_edit = st.text_area(
+                "Observaciones / Acción clínica",
+                value=row.Observaciones,
+                key=f"obs_edit_{row.ID}",
+            )
+
+            col_guardar, col_cancelar = st.columns(2)
+            with col_guardar:
+                if st.button("💾 Guardar cambios", key=f"guardar_edit_cita_{row.ID}", type="primary"):
+                    if carrito_edit_df is None or carrito_edit_df.empty:
+                        st.error("La cita necesita al menos un tratamiento.")
+                    else:
+                        actualizar_cita(
+                            row.ID, fecha_edit, cliente_edit_id,
+                            st.session_state["carrito_edicion"], observaciones_edit.strip(),
+                        )
+                        st.cache_data.clear()
+                        st.session_state["editando_cita_id"] = None
+                        st.session_state.pop("carrito_edicion", None)
+                        st.success("Cita actualizada.")
+                        st.rerun()
+            with col_cancelar:
+                if st.button("Cancelar", key=f"cancelar_edit_cita_{row.ID}"):
+                    st.session_state["editando_cita_id"] = None
+                    st.session_state.pop("carrito_edicion", None)
+                    st.rerun()
+
+
+def ficha_cliente(cliente_id, clientes, citas):
+    info = clientes.loc[clientes["ID"] == cliente_id].iloc[0]
+    editando = st.session_state.get("editando_cliente_id") == cliente_id
+    confirmar_key = f"confirmar_eliminar_cliente_{cliente_id}"
+
+    col_titulo, col_editar, col_eliminar = st.columns([3, 1, 1])
+    with col_titulo:
+        st.subheader(info["Nombre"])
+    with col_editar:
+        if not editando and st.button("✏️ Editar", key=f"btn_editar_cliente_{cliente_id}"):
+            st.session_state["editando_cliente_id"] = cliente_id
+            st.rerun()
+    with col_eliminar:
+        if not editando and not st.session_state.get(confirmar_key) and st.button(
+            "🗑️ Eliminar", key=f"btn_eliminar_cliente_{cliente_id}"
+        ):
+            st.session_state[confirmar_key] = True
+            st.rerun()
+
+    if st.session_state.get(confirmar_key):
+        n_citas = citas.loc[citas["ClienteID"] == cliente_id, "ID"].nunique() if not citas.empty else 0
+        aviso = f"¿Seguro que querés eliminar a **{info['Nombre']}**? Esta acción no se puede deshacer."
+        if n_citas:
+            aviso += (
+                f" Tiene {n_citas} cita(s) registrada(s); van a quedar "
+                "como \"cliente desconocido\" en los reportes."
+            )
+        st.warning(aviso)
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("Sí, eliminar definitivamente", key=f"confirmar_del_cliente_{cliente_id}"):
+                eliminar_cliente(cliente_id)
+                st.cache_data.clear()
+                st.session_state[confirmar_key] = False
+                st.session_state["cliente_activo"] = None
+                st.success("Cliente eliminado.")
+                st.rerun()
+        with c2:
+            if st.button("Cancelar", key=f"cancelar_del_cliente_{cliente_id}"):
+                st.session_state[confirmar_key] = False
+                st.rerun()
+        return
+
+    if editando:
+        formulario_editar_cliente(cliente_id, info)
+        return
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("RUT", info["RUT"] or "—")
+    col2.metric("Teléfono", info["Telefono"] or "—")
+    col3.metric("Nacimiento", info["FechaNacimiento"] or "—")
+    if info["Email"]:
+        st.caption(f"✉️ {info['Email']}")
+    if info["Direccion"]:
+        st.caption(f"📍 {info['Direccion']}")
+    if info["Notas"]:
+        st.info(f"**Notas:** {info['Notas']}")
+
+    st.divider()
+    st.markdown("**Historial de citas**")
+
+    citas_cliente = citas[citas["ClienteID"] == cliente_id] if not citas.empty else citas
+    if citas_cliente.empty:
+        st.caption("Todavía no tiene citas registradas.")
+        return
+
+    citas_agrupadas = agrupar_citas(citas_cliente).sort_values("Fecha", ascending=False)
+
+    col_a, col_b = st.columns(2)
+    col_a.metric("Visitas", len(citas_agrupadas))
+    col_b.metric("Total gastado", formatear_clp(citas_cliente["Precio"].sum()))
+
+    catalogo = cargar_catalogo()
+    for row in citas_agrupadas.itertuples():
+        fila_cita(row, cliente_id, clientes, citas_cliente, catalogo)
+
+
+def pagina_clientes():
+    st.title("🧑 Clientes")
+    clientes = cargar_clientes()
+    citas = cargar_citas()
+
+    col_lista, col_detalle = st.columns([1, 2], gap="large")
+
+    with col_lista:
+        formulario_nuevo_cliente()
+
+        if clientes.empty:
+            st.info("Todavía no hay clientes registrados.")
+            return
+
+        st.text_input("🔍 Buscar por nombre o RUT", key="busqueda_cliente")
+        busqueda = st.session_state.get("busqueda_cliente", "").strip().lower()
+
+        clientes_filtrados = clientes.sort_values("Nombre").reset_index(drop=True)
+        if busqueda:
+            busqueda_rut = busqueda.replace("-", "").replace(".", "")
+            mask = (
+                clientes_filtrados["Nombre"].str.lower().str.contains(busqueda, regex=False)
+                | clientes_filtrados["RUT"].str.replace("-", "").str.lower().str.contains(
+                    busqueda_rut, regex=False
+                )
+            )
+            clientes_filtrados = clientes_filtrados[mask].reset_index(drop=True)
+
+        ultima_visita = (
+            citas.groupby("ClienteID")["Fecha"].max().to_dict() if not citas.empty else {}
+        )
+        tabla_lista = pd.DataFrame({
+            "Nombre": clientes_filtrados["Nombre"],
+            "RUT": clientes_filtrados["RUT"],
+            "Última visita": [
+                ultima_visita[cid].strftime("%d/%m/%Y")
+                if cid in ultima_visita and pd.notna(ultima_visita[cid]) else "—"
+                for cid in clientes_filtrados["ID"]
+            ],
+        })
+
+        if tabla_lista.empty:
+            st.caption("Sin resultados para esa búsqueda.")
+        else:
+            evento = st.dataframe(
+                tabla_lista,
+                use_container_width=True,
+                hide_index=True,
+                on_select="rerun",
+                selection_mode="single-row",
+                key="tabla_clientes_sel",
+            )
+            filas_sel = evento.selection.rows if evento and evento.selection else []
+            if filas_sel:
+                st.session_state["cliente_activo"] = clientes_filtrados.iloc[filas_sel[0]]["ID"]
+
+    ids_validos = clientes["ID"].tolist()
+    cliente_id_actual = st.session_state.get("cliente_activo")
+    if cliente_id_actual not in ids_validos:
+        cliente_id_actual = ids_validos[0]
+        st.session_state["cliente_activo"] = cliente_id_actual
+
+    with col_detalle:
+        ficha_cliente(cliente_id_actual, clientes, citas)
+
+
+# -----------------------------
+# Página: Nueva cita
+# -----------------------------
+def pagina_nueva_cita():
+    st.title("➕ Nueva cita")
     catalogo = cargar_catalogo()
     clientes = cargar_clientes()
 
@@ -529,21 +702,26 @@ with tab_registro:
             "El catálogo está vacío. Agrega tratamientos y precios en la hoja "
             f"'{TAB_CATALOGO}' de tu Google Sheet."
         )
-    elif clientes.empty:
+        return
+    if clientes.empty:
         st.warning(
-            "Todavía no hay clientes registrados. Creá uno en la pestaña "
-            "'🧑 Nuevo cliente' antes de registrar una cita."
+            "Todavía no hay clientes registrados. Creá uno en la sección '🧑 Clientes' "
+            "antes de registrar una cita."
         )
-    else:
-        if "mensaje_guardado" not in st.session_state:
-            st.session_state.mensaje_guardado = None
+        return
 
-        opciones_cliente = {
-            row.ID: f"{row.Nombre} ({row.RUT})" for row in clientes.itertuples()
-        }
+    if "carrito" not in st.session_state:
+        st.session_state.carrito = []
+    if "mensaje_guardado" not in st.session_state:
+        st.session_state.mensaje_guardado = None
 
-        col1, col2 = st.columns(2)
-        with col1:
+    opciones_cliente = {row.ID: f"{row.Nombre} ({row.RUT})" for row in clientes.itertuples()}
+
+    col_izq, col_der = st.columns([1.1, 0.9], gap="large")
+
+    with col_izq:
+        with st.container(border=True):
+            st.markdown("**Datos de la cita**")
             limpiar_seleccion_invalida("cliente_id_sel", list(opciones_cliente.keys()))
             cliente_id_sel = st.selectbox(
                 "Cliente",
@@ -551,289 +729,142 @@ with tab_registro:
                 format_func=lambda cid: opciones_cliente[cid],
                 key="cliente_id_sel",
             )
-        with col2:
             fecha = st.date_input("Fecha", value=date.today(), key="fecha_input")
 
-        st.divider()
-        st.subheader("Agregar tratamiento")
+            st.markdown("**Agregar tratamiento**")
+            render_carrito_agregar(catalogo, "carrito")
 
-        carrito_df = render_carrito(catalogo, "carrito")
-
-        st.divider()
-
-        if carrito_df is not None:
             observaciones_nueva = st.text_area(
                 "Observaciones / Acción clínica (opcional)", key="observaciones_input"
             )
 
-            if st.button("✅ Guardar cita", type="primary"):
+    with col_der:
+        with st.container(border=True):
+            st.markdown("**Tratamientos de la cita**")
+            carrito_df = render_carrito_tabla("carrito")
+
+            if carrito_df is not None and not carrito_df.empty:
                 total_calculado = carrito_df["Precio"].sum()
-                guardar_cita(
-                    fecha, cliente_id_sel, st.session_state.carrito,
-                    observaciones_nueva.strip(),
-                )
-                st.cache_data.clear()
-                st.session_state.carrito = []
-                st.session_state.pop("observaciones_input", None)
-                st.session_state.mensaje_guardado = (
-                    f"Cita guardada: {opciones_cliente[cliente_id_sel]} — "
-                    f"{formatear_clp(total_calculado)}"
-                )
-                st.rerun()
+                if st.button("✅ Guardar cita", type="primary", use_container_width=True):
+                    guardar_cita(
+                        fecha, cliente_id_sel, st.session_state.carrito,
+                        observaciones_nueva.strip(),
+                    )
+                    st.cache_data.clear()
+                    st.session_state.carrito = []
+                    st.session_state.pop("observaciones_input", None)
+                    st.session_state.mensaje_guardado = (
+                        f"Cita guardada: {opciones_cliente[cliente_id_sel]} — "
+                        f"{formatear_clp(total_calculado)}"
+                    )
+                    st.rerun()
 
-        if st.session_state.mensaje_guardado:
-            st.success(st.session_state.mensaje_guardado)
-            st.session_state.mensaje_guardado = None
+    if st.session_state.mensaje_guardado:
+        st.success(st.session_state.mensaje_guardado)
+        st.session_state.mensaje_guardado = None
 
-# --- TAB 3: resumen ---
-with tab_resumen:
+
+# -----------------------------
+# Página: Resumen
+# -----------------------------
+def pagina_resumen():
+    st.title("📊 Resumen")
     citas = cargar_citas()
     clientes = cargar_clientes()
 
     if citas.empty:
         st.info("Todavía no hay citas registradas.")
-    else:
-        citas_agrupadas = agrupar_citas(citas).merge(
-            clientes[["ID", "Nombre", "RUT"]].rename(columns={"ID": "ClienteID"}),
-            on="ClienteID",
-            how="left",
-        )
-        citas_agrupadas["Nombre"] = citas_agrupadas["Nombre"].fillna("(cliente desconocido)")
-        citas_agrupadas["RUT"] = citas_agrupadas["RUT"].fillna("")
+        return
 
-        st.subheader("Detalle de citas")
+    citas_agrupadas = agrupar_citas(citas).merge(
+        clientes[["ID", "Nombre", "RUT"]].rename(columns={"ID": "ClienteID"}),
+        on="ClienteID",
+        how="left",
+    )
+    citas_agrupadas["Nombre"] = citas_agrupadas["Nombre"].fillna("(cliente desconocido)")
+    citas_agrupadas["RUT"] = citas_agrupadas["RUT"].fillna("")
+
+    ticket_promedio = citas_agrupadas["Total"].mean() if len(citas_agrupadas) else 0
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Ingreso total registrado", formatear_clp(citas["Precio"].sum()))
+    col2.metric("Citas registradas", len(citas_agrupadas))
+    col3.metric("Ticket promedio", formatear_clp(ticket_promedio))
+
+    st.divider()
+
+    col_chart, col_rank = st.columns([1.2, 0.8], gap="large")
+
+    with col_chart:
+        st.markdown("**Ingresos por día**")
+        opciones_rango = {
+            "Últimos 7 días": 7,
+            "Últimos 14 días": 14,
+            "Últimos 30 días": 30,
+            "Todo el historial": None,
+        }
+        rango_sel = st.selectbox("Mostrar", list(opciones_rango.keys()))
+        dias = opciones_rango[rango_sel]
+
+        citas_grafico = citas
+        if dias is not None:
+            fecha_limite = pd.Timestamp(date.today()) - pd.Timedelta(days=dias - 1)
+            citas_grafico = citas[citas["Fecha"] >= fecha_limite]
+
+        ingresos = citas_grafico.set_index("Fecha").resample("D")["Precio"].sum()
+        st.bar_chart(ingresos)
+
+    with col_rank:
+        st.markdown("**Resumen por cliente**")
+        resumen_cliente = (
+            citas_agrupadas.groupby(["ClienteID", "Nombre"])
+            .agg(Visitas=("ID", "count"), Total_gastado=("Total", "sum"))
+            .sort_values("Total_gastado", ascending=False)
+            .reset_index()
+            .drop(columns=["ClienteID"])
+        )
+        resumen_cliente_mostrar = resumen_cliente.copy()
+        resumen_cliente_mostrar["Total_gastado"] = resumen_cliente_mostrar["Total_gastado"].apply(
+            formatear_clp
+        )
+        st.dataframe(resumen_cliente_mostrar, use_container_width=True, hide_index=True)
+
+    st.divider()
+    with st.expander("Ver detalle completo de citas"):
         detalle_mostrar = citas_agrupadas[
             ["Fecha", "Nombre", "RUT", "Tratamientos", "Total", "Observaciones"]
         ].sort_values("Fecha", ascending=False).copy()
         detalle_mostrar["Total"] = detalle_mostrar["Total"].apply(formatear_clp)
         st.dataframe(detalle_mostrar, use_container_width=True, hide_index=True)
 
-        st.divider()
 
-        col1, col2 = st.columns(2)
-
-        with col1:
-            st.subheader("Resumen por cliente")
-            resumen_cliente = (
-                citas_agrupadas.groupby(["ClienteID", "Nombre"])
-                .agg(Visitas=("ID", "count"), Total_gastado=("Total", "sum"))
-                .sort_values("Total_gastado", ascending=False)
-                .reset_index()
-                .drop(columns=["ClienteID"])
-            )
-            resumen_cliente_mostrar = resumen_cliente.copy()
-            resumen_cliente_mostrar["Total_gastado"] = resumen_cliente_mostrar[
-                "Total_gastado"
-            ].apply(formatear_clp)
-            st.dataframe(resumen_cliente_mostrar, use_container_width=True, hide_index=True)
-
-        with col2:
-            st.subheader("Ingresos por día")
-            opciones_rango = {
-                "Últimos 7 días": 7,
-                "Últimos 14 días": 14,
-                "Últimos 30 días": 30,
-                "Todo el historial": None,
-            }
-            rango_sel = st.selectbox("Mostrar", list(opciones_rango.keys()))
-            dias = opciones_rango[rango_sel]
-
-            citas_grafico = citas
-            if dias is not None:
-                fecha_limite = pd.Timestamp(date.today()) - pd.Timedelta(days=dias - 1)
-                citas_grafico = citas[citas["Fecha"] >= fecha_limite]
-
-            ingresos = citas_grafico.set_index("Fecha").resample("D")["Precio"].sum()
-            st.bar_chart(ingresos)
-
-        st.divider()
-        st.metric("Ingreso total registrado", formatear_clp(citas["Precio"].sum()))
-
-# --- TAB 4: ficha de cliente (historial de citas por cliente) ---
-with tab_ficha_cliente:
-    clientes = cargar_clientes()
+# -----------------------------
+# Barra de KPIs (se muestra en todas las páginas)
+# -----------------------------
+def render_kpis():
     citas = cargar_citas()
-    catalogo = cargar_catalogo()
+    clientes = cargar_clientes()
 
-    if clientes.empty:
-        st.info(
-            "Todavía no hay clientes registrados. Creá uno en la pestaña "
-            "'🧑 Nuevo cliente'."
-        )
-    else:
-        opciones_cliente = {
-            row.ID: f"{row.Nombre} ({row.RUT})" for row in clientes.itertuples()
-        }
-        limpiar_seleccion_invalida("cliente_id_ver", list(opciones_cliente.keys()))
-        cliente_id_ver = st.selectbox(
-            "Cliente",
-            options=list(opciones_cliente.keys()),
-            format_func=lambda cid: opciones_cliente[cid],
-            key="cliente_id_ver",
-        )
+    hoy = pd.Timestamp(date.today())
+    citas_hoy = citas[citas["Fecha"] == hoy] if not citas.empty else citas
+    n_citas_hoy = citas_hoy["ID"].nunique() if not citas_hoy.empty else 0
+    ingresos_hoy = citas_hoy["Precio"].sum() if not citas_hoy.empty else 0
 
-        info_cliente = clientes.loc[clientes["ID"] == cliente_id_ver].iloc[0]
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Citas hoy", n_citas_hoy)
+    col2.metric("Ingresos hoy", formatear_clp(ingresos_hoy))
+    col3.metric("Clientes", len(clientes))
+    st.divider()
 
-        st.subheader(info_cliente["Nombre"])
-        col1, col2, col3 = st.columns(3)
-        col1.metric("RUT", info_cliente["RUT"] or "—")
-        col2.metric("Teléfono", info_cliente["Telefono"] or "—")
-        col3.metric("Email", info_cliente["Email"] or "—")
 
-        col4, col5 = st.columns(2)
-        with col4:
-            st.write(f"**Fecha de nacimiento:** {info_cliente['FechaNacimiento'] or '—'}")
-        with col5:
-            st.write(f"**Dirección:** {info_cliente['Direccion'] or '—'}")
-        if info_cliente["Notas"]:
-            st.info(f"**Notas:** {info_cliente['Notas']}")
+# -----------------------------
+# Navegación
+# -----------------------------
+pagina = st.navigation([
+    st.Page(pagina_clientes, title="Clientes", icon="🧑", default=True),
+    st.Page(pagina_nueva_cita, title="Nueva cita", icon="➕"),
+    st.Page(pagina_resumen, title="Resumen", icon="📊"),
+])
 
-        st.divider()
-        st.subheader("Historial de citas")
-
-        citas_cliente = (
-            citas[citas["ClienteID"] == cliente_id_ver] if not citas.empty else citas
-        )
-
-        if citas_cliente.empty:
-            st.info("Este cliente todavía no tiene citas registradas.")
-        else:
-            citas_cliente_agrupadas = agrupar_citas(citas_cliente).sort_values(
-                "Fecha", ascending=False
-            )
-
-            col_a, col_b = st.columns(2)
-            col_a.metric("Visitas", len(citas_cliente_agrupadas))
-            col_b.metric("Total gastado", formatear_clp(citas_cliente["Precio"].sum()))
-
-            opciones_citas = {
-                row.ID: (
-                    f"{row.Fecha.strftime('%d/%m/%Y') if pd.notna(row.Fecha) else '(sin fecha)'}"
-                    f" — {formatear_clp(row.Total)}"
-                )
-                for row in citas_cliente_agrupadas.itertuples()
-            }
-            limpiar_seleccion_invalida(
-                f"cita_sel_ficha_{cliente_id_ver}", list(opciones_citas.keys())
-            )
-            cita_sel = st.selectbox(
-                "Elegí una cita para ver el detalle",
-                options=list(opciones_citas.keys()),
-                format_func=lambda cid: opciones_citas[cid],
-                key=f"cita_sel_ficha_{cliente_id_ver}",
-            )
-
-            tabla_tratamientos = (
-                citas_cliente.loc[citas_cliente["ID"] == cita_sel, ["Tratamiento", "Precio"]]
-                .reset_index(drop=True)
-            )
-            tabla_tratamientos_mostrar = tabla_tratamientos.copy()
-            tabla_tratamientos_mostrar["Precio"] = tabla_tratamientos_mostrar["Precio"].apply(
-                formatear_clp
-            )
-            st.dataframe(tabla_tratamientos_mostrar, use_container_width=True, hide_index=True)
-            st.metric("Total de esta cita", formatear_clp(tabla_tratamientos["Precio"].sum()))
-
-            obs_actual = citas_cliente_agrupadas.loc[
-                citas_cliente_agrupadas["ID"] == cita_sel, "Observaciones"
-            ].iloc[0]
-            if obs_actual:
-                st.info(f"**Observaciones / Acción clínica:** {obs_actual}")
-
-            st.divider()
-
-            if "editando_cita_id" not in st.session_state:
-                st.session_state.editando_cita_id = None
-
-            confirmar_del_cita_key = f"confirmar_eliminar_cita_{cita_sel}"
-            if confirmar_del_cita_key not in st.session_state:
-                st.session_state[confirmar_del_cita_key] = False
-
-            if (
-                st.session_state.editando_cita_id != cita_sel
-                and not st.session_state[confirmar_del_cita_key]
-            ):
-                col_editar, col_eliminar = st.columns(2)
-                with col_editar:
-                    if st.button("✏️ Editar esta cita"):
-                        st.session_state.editando_cita_id = cita_sel
-                        st.session_state["carrito_edicion"] = tabla_tratamientos.to_dict("records")
-                        st.rerun()
-                with col_eliminar:
-                    if st.button("🗑️ Eliminar cita", key=f"btn_eliminar_cita_{cita_sel}"):
-                        st.session_state[confirmar_del_cita_key] = True
-                        st.rerun()
-            elif st.session_state[confirmar_del_cita_key]:
-                st.warning(
-                    "¿Seguro que querés eliminar esta cita completa? "
-                    "Esta acción no se puede deshacer."
-                )
-                col_si, col_no = st.columns(2)
-                with col_si:
-                    if st.button(
-                        "Sí, eliminar definitivamente",
-                        key=f"btn_confirmar_eliminar_cita_{cita_sel}",
-                    ):
-                        eliminar_cita(cita_sel)
-                        st.cache_data.clear()
-                        st.session_state[confirmar_del_cita_key] = False
-                        st.success("Cita eliminada.")
-                        st.rerun()
-                with col_no:
-                    if st.button("Cancelar", key=f"btn_cancelar_eliminar_cita_{cita_sel}"):
-                        st.session_state[confirmar_del_cita_key] = False
-                        st.rerun()
-            else:
-                st.subheader("Editando cita")
-
-                fecha_actual = citas_cliente_agrupadas.loc[
-                    citas_cliente_agrupadas["ID"] == cita_sel, "Fecha"
-                ].iloc[0]
-
-                col_f, col_c = st.columns(2)
-                with col_f:
-                    fecha_edit = st.date_input(
-                        "Fecha",
-                        value=fecha_actual.date() if pd.notna(fecha_actual) else date.today(),
-                        key=f"fecha_edit_{cita_sel}",
-                    )
-                with col_c:
-                    ids_cliente = list(opciones_cliente.keys())
-                    cliente_edit_id = st.selectbox(
-                        "Cliente",
-                        options=ids_cliente,
-                        format_func=lambda cid: opciones_cliente[cid],
-                        index=ids_cliente.index(cliente_id_ver),
-                        key=f"cliente_edit_{cita_sel}",
-                    )
-
-                st.write("**Tratamientos**")
-                carrito_edit_df = render_carrito(catalogo, "carrito_edicion")
-
-                observaciones_edit = st.text_area(
-                    "Observaciones / Acción clínica",
-                    value=obs_actual,
-                    key=f"obs_edit_{cita_sel}",
-                )
-
-                col_guardar, col_cancelar = st.columns(2)
-                with col_guardar:
-                    if st.button("💾 Guardar cambios", type="primary"):
-                        if carrito_edit_df is None or carrito_edit_df.empty:
-                            st.error("La cita necesita al menos un tratamiento.")
-                        else:
-                            actualizar_cita(
-                                cita_sel, fecha_edit, cliente_edit_id,
-                                st.session_state["carrito_edicion"],
-                                observaciones_edit.strip(),
-                            )
-                            st.cache_data.clear()
-                            st.session_state.editando_cita_id = None
-                            st.session_state.pop("carrito_edicion", None)
-                            st.success("Cita actualizada.")
-                            st.rerun()
-                with col_cancelar:
-                    if st.button("Cancelar edición"):
-                        st.session_state.editando_cita_id = None
-                        st.session_state.pop("carrito_edicion", None)
-                        st.rerun()
+render_kpis()
+pagina.run()
