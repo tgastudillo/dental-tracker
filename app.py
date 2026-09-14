@@ -12,6 +12,36 @@ from datetime import date, datetime, timedelta
 # -----------------------------
 st.set_page_config(page_title="Registro de Tratamientos", page_icon="🦷", layout="wide")
 
+
+def verificar_login():
+    """Login simple: correo + contraseña contra st.secrets['usuarios']."""
+    if st.session_state.get("autenticado"):
+        return True
+
+    st.title("🦷 Registro de Tratamientos")
+    st.subheader("Iniciar sesión")
+
+    with st.form("form_login"):
+        email = st.text_input("Correo")
+        password = st.text_input("Contraseña", type="password")
+        enviado = st.form_submit_button("Ingresar")
+
+    if enviado:
+        usuarios = st.secrets.get("usuarios", {})
+        if email in usuarios and usuarios[email] == password:
+            st.session_state["autenticado"] = True
+            st.session_state["usuario_email"] = email
+            st.rerun()
+        else:
+            st.error("Correo o contraseña incorrectos.")
+
+    return False
+
+
+if not verificar_login():
+    st.stop()
+
+
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
 ]
@@ -914,6 +944,12 @@ st.logo("🦷", size="large")
 
 with st.sidebar:
     st.caption("Registro de Tratamientos")
+    if st.session_state.get("usuario_email"):
+        st.caption(f"Sesión: {st.session_state['usuario_email']}")
+    if st.button("Cerrar sesión"):
+        st.session_state["autenticado"] = False
+        st.session_state.pop("usuario_email", None)
+        st.rerun()
 
 pagina = st.navigation([
     st.Page(pagina_clientes, title="Clientes y Citas Pasadas", icon="🧑", default=True),
