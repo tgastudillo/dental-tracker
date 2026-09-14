@@ -123,6 +123,21 @@ def fila_segun_encabezado(encabezado, valores):
     return [valores.get(col, "") for col in encabezado]
 
 
+def eliminar_filas_por_id(ws, valor_id):
+    """Elimina todas las filas donde la columna 'ID' sea igual a valor_id."""
+    all_values = ws.get_all_values()
+    encabezado = all_values[0]
+    idx_id = encabezado.index("ID")
+    filas_borrar = [
+        i + 1
+        for i, row in enumerate(all_values)
+        if i > 0 and len(row) > idx_id and row[idx_id] == valor_id
+    ]
+    for fila in sorted(filas_borrar, reverse=True):
+        ws.delete_rows(fila)
+    return len(filas_borrar)
+
+
 def guardar_cliente(nombre, rut, telefono, email, fecha_nacimiento, direccion, notas):
     ws = get_worksheet(TAB_CLIENTES)
     encabezado = ws.row_values(1)
@@ -193,20 +208,21 @@ def guardar_cita(fecha, cliente_id, items, observaciones):
     ws.append_rows(filas, value_input_option="RAW")
 
 
+def eliminar_cliente(cliente_id):
+    ws = get_worksheet(TAB_CLIENTES)
+    eliminar_filas_por_id(ws, cliente_id)
+
+
+def eliminar_cita(cita_id):
+    ws = get_worksheet(TAB_CITAS)
+    eliminar_filas_por_id(ws, cita_id)
+
+
 def actualizar_cita(cita_id, fecha, cliente_id, items, observaciones):
     """Borra todas las filas de esa cita (mismo ID) y las vuelve a escribir."""
     ws = get_worksheet(TAB_CITAS)
-    all_values = ws.get_all_values()
-    encabezado = all_values[0]
-    idx_id = encabezado.index("ID")
-
-    filas_borrar = [
-        i + 1
-        for i, row in enumerate(all_values)
-        if i > 0 and len(row) > idx_id and row[idx_id] == cita_id
-    ]
-    for fila in sorted(filas_borrar, reverse=True):
-        ws.delete_rows(fila)
+    eliminar_filas_por_id(ws, cita_id)
+    encabezado = ws.row_values(1)
 
     fecha_str = fecha.strftime("%d/%m/%Y")
     nuevas_filas = []
@@ -391,6 +407,45 @@ with tab_clientes:
                     )
                     st.cache_data.clear()
                     st.success("Cliente actualizado.")
+                    st.rerun()
+
+        confirmar_key = f"confirmar_eliminar_cliente_{cliente_id_editar}"
+        if confirmar_key not in st.session_state:
+            st.session_state[confirmar_key] = False
+
+        if not st.session_state[confirmar_key]:
+            if st.button("🗑️ Eliminar cliente", key=f"btn_eliminar_cliente_{cliente_id_editar}"):
+                st.session_state[confirmar_key] = True
+                st.rerun()
+        else:
+            citas_todas = cargar_citas()
+            n_citas = 0
+            if not citas_todas.empty:
+                n_citas = citas_todas.loc[
+                    citas_todas["ClienteID"] == cliente_id_editar, "ID"
+                ].nunique()
+
+            aviso = f"¿Seguro que querés eliminar a **{datos['Nombre']}**? Esta acción no se puede deshacer."
+            if n_citas:
+                aviso += (
+                    f" Tiene {n_citas} cita(s) registrada(s); van a quedar "
+                    "como \"cliente desconocido\" en los reportes."
+                )
+            st.warning(aviso)
+            col_si, col_no = st.columns(2)
+            with col_si:
+                if st.button(
+                    "Sí, eliminar definitivamente",
+                    key=f"btn_confirmar_eliminar_cliente_{cliente_id_editar}",
+                ):
+                    eliminar_cliente(cliente_id_editar)
+                    st.cache_data.clear()
+                    st.session_state[confirmar_key] = False
+                    st.success("Cliente eliminado.")
+                    st.rerun()
+            with col_no:
+                if st.button("Cancelar", key=f"btn_cancelar_eliminar_cliente_{cliente_id_editar}"):
+                    st.session_state[confirmar_key] = False
                     st.rerun()
 
     st.divider()
@@ -615,11 +670,44 @@ with tab_ficha_cliente:
             if "editando_cita_id" not in st.session_state:
                 st.session_state.editando_cita_id = None
 
-            if st.session_state.editando_cita_id != cita_sel:
-                if st.button("✏️ Editar esta cita"):
-                    st.session_state.editando_cita_id = cita_sel
-                    st.session_state["carrito_edicion"] = tabla_tratamientos.to_dict("records")
-                    st.rerun()
+            confirmar_del_cita_key = f"confirmar_eliminar_cita_{cita_sel}"
+            if confirmar_del_cita_key not in st.session_state:
+                st.session_state[confirmar_del_cita_key] = False
+
+            if (
+                st.session_state.editando_cita_id != cita_sel
+                and not st.session_state[confirmar_del_cita_key]
+            ):
+                col_editar, col_eliminar = st.columns(2)
+                with col_editar:
+                    if st.button("✏️ Editar esta cita"):
+                        st.session_state.editando_cita_id = cita_sel
+                        st.session_state["carrito_edicion"] = tabla_tratamientos.to_dict("records")
+                        st.rerun()
+                with col_eliminar:
+                    if st.button("🗑️ Eliminar cita", key=f"btn_eliminar_cita_{cita_sel}"):
+                        st.session_state[confirmar_del_cita_key] = True
+                        st.rerun()
+            elif st.session_state[confirmar_del_cita_key]:
+                st.warning(
+                    "¿Seguro que querés eliminar esta cita completa? "
+                    "Esta acción no se puede deshacer."
+                )
+                col_si, col_no = st.columns(2)
+                with col_si:
+                    if st.button(
+                        "Sí, eliminar definitivamente",
+                        key=f"btn_confirmar_eliminar_cita_{cita_sel}",
+                    ):
+                        eliminar_cita(cita_sel)
+                        st.cache_data.clear()
+                        st.session_state[confirmar_del_cita_key] = False
+                        st.success("Cita eliminada.")
+                        st.rerun()
+                with col_no:
+                    if st.button("Cancelar", key=f"btn_cancelar_eliminar_cita_{cita_sel}"):
+                        st.session_state[confirmar_del_cita_key] = False
+                        st.rerun()
             else:
                 st.subheader("Editando cita")
 
