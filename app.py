@@ -325,7 +325,11 @@ with tab_clientes:
         with col2:
             email_cliente = st.text_input("Email")
             fecha_nacimiento = st.date_input(
-                "Fecha de nacimiento", value=None, format="DD/MM/YYYY"
+                "Fecha de nacimiento",
+                value=None,
+                min_value=date(1900, 1, 1),
+                max_value=date.today(),
+                format="DD/MM/YYYY",
             )
             direccion_cliente = st.text_input("Dirección")
 
@@ -386,6 +390,8 @@ with tab_clientes:
                 fecha_nacimiento_e = st.date_input(
                     "Fecha de nacimiento",
                     value=parsear_fecha(datos["FechaNacimiento"]),
+                    min_value=date(1900, 1, 1),
+                    max_value=date.today(),
                     format="DD/MM/YYYY",
                 )
                 direccion_e = st.text_input("Dirección", value=datos["Direccion"])
