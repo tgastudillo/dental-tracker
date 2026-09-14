@@ -63,7 +63,7 @@ def get_worksheet(nombre_tab):
     return sh.worksheet(nombre_tab)
 
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=5)
 def cargar_catalogo():
     ws = get_worksheet(TAB_CATALOGO)
     data = ws.get_all_records(value_render_option="UNFORMATTED_VALUE")
@@ -74,7 +74,7 @@ def cargar_catalogo():
     return df
 
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=5)
 def cargar_clientes():
     ws = get_worksheet(TAB_CLIENTES)
     data = ws.get_all_records(value_render_option="UNFORMATTED_VALUE")
@@ -87,7 +87,7 @@ def cargar_clientes():
     return df.astype(str)
 
 
-@st.cache_data(ttl=30)
+@st.cache_data(ttl=5)
 def cargar_citas():
     """Cada fila es UN tratamiento. Varias filas comparten el mismo ID = una cita."""
     ws = get_worksheet(TAB_CITAS)
