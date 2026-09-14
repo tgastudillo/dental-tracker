@@ -37,6 +37,11 @@ def formatear_rut(rut):
     return f"{cuerpo}-{dv}"
 
 
+def formatear_clp(monto):
+    """Formatea como peso chileno: separador de miles con punto, sin decimales."""
+    return f"${monto:,.0f}".replace(",", ".")
+
+
 def parsear_fecha(texto):
     if not texto:
         return None
@@ -44,6 +49,60 @@ def parsear_fecha(texto):
         return datetime.strptime(texto, "%d/%m/%Y").date()
     except ValueError:
         return None
+
+
+MESES = [
+    "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+    "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+]
+
+
+def selector_fecha_nacimiento(key_prefix, valor_actual=None):
+    """Tres selectbox (Día/Mes/Año) en vez de un calendario, para elegir
+    fechas viejas sin pelear con la paginación por años del date_input."""
+    anios = list(range(date.today().year, 1899, -1))
+
+    col_d, col_m, col_a = st.columns(3)
+    with col_d:
+        dia = st.selectbox(
+            "Día",
+            options=[None] + list(range(1, 32)),
+            format_func=lambda d: "—" if d is None else str(d),
+            index=(valor_actual.day if valor_actual else 0),
+            key=f"{key_prefix}_dia",
+        )
+    with col_m:
+        mes = st.selectbox(
+            "Mes",
+            options=[None] + list(range(1, 13)),
+            format_func=lambda m: "—" if m is None else MESES[m - 1],
+            index=(valor_actual.month if valor_actual else 0),
+            key=f"{key_prefix}_mes",
+        )
+    with col_a:
+        anio = st.selectbox(
+            "Año",
+            options=[None] + anios,
+            format_func=lambda a: "—" if a is None else str(a),
+            index=(anios.index(valor_actual.year) + 1 if valor_actual else 0),
+            key=f"{key_prefix}_anio",
+        )
+
+    if dia and mes and anio:
+        try:
+            return date(anio, mes, dia)
+        except ValueError:
+            st.error("Esa fecha de nacimiento no existe (ej: 31 de febrero).")
+            return None
+    return None
+
+
+def limpiar_seleccion_invalida(key, opciones_validas):
+    """Si un selectbox guardó un valor (cliente/cita) que ya no existe -por
+    ejemplo porque se eliminó-, lo saca de session_state para que el widget
+    vuelva a un valor por defecto en vez de romper con las opciones nuevas."""
+    if key in st.session_state and st.session_state[key] not in opciones_validas:
+        del st.session_state[key]
 
 
 # -----------------------------
@@ -257,7 +316,7 @@ def render_carrito(catalogo, carrito_key):
         catalogo.loc[catalogo["Tratamiento"] == tratamiento_sel, "Precio"].iloc[0]
     )
     with col_precio:
-        st.metric("Precio", f"${precio_sel:,.0f}")
+        st.metric("Precio", formatear_clp(precio_sel))
     with col_btn:
         st.write("")
         st.write("")
@@ -272,7 +331,9 @@ def render_carrito(catalogo, carrito_key):
         return None
 
     carrito_df = pd.DataFrame(st.session_state[carrito_key])
-    st.dataframe(carrito_df, use_container_width=True, hide_index=True)
+    carrito_mostrar = carrito_df.copy()
+    carrito_mostrar["Precio"] = carrito_mostrar["Precio"].apply(formatear_clp)
+    st.dataframe(carrito_mostrar, use_container_width=True, hide_index=True)
 
     col_quitar, col_vaciar = st.columns([3, 1])
     with col_quitar:
@@ -281,7 +342,7 @@ def render_carrito(catalogo, carrito_key):
             options=list(range(len(st.session_state[carrito_key]))),
             format_func=lambda i: (
                 f"{st.session_state[carrito_key][i]['Tratamiento']} "
-                f"(${st.session_state[carrito_key][i]['Precio']:,.0f})"
+                f"({formatear_clp(st.session_state[carrito_key][i]['Precio'])})"
             ),
             key=f"{carrito_key}_quitar_sel",
         )
@@ -296,7 +357,7 @@ def render_carrito(catalogo, carrito_key):
             st.rerun()
 
     total = carrito_df["Precio"].sum()
-    st.metric("Total", f"${total:,.0f}")
+    st.metric("Total", formatear_clp(total))
     return carrito_df
 
 
@@ -324,14 +385,10 @@ with tab_clientes:
             telefono_cliente = st.text_input("Teléfono")
         with col2:
             email_cliente = st.text_input("Email")
-            fecha_nacimiento = st.date_input(
-                "Fecha de nacimiento",
-                value=None,
-                min_value=date(1900, 1, 1),
-                max_value=date.today(),
-                format="DD/MM/YYYY",
-            )
             direccion_cliente = st.text_input("Dirección")
+
+        st.write("Fecha de nacimiento")
+        fecha_nacimiento = selector_fecha_nacimiento("nac_nuevo")
 
         notas_cliente = st.text_area("Notas (alergias, antecedentes médicos, etc.)")
 
@@ -371,6 +428,7 @@ with tab_clientes:
         opciones_editar = {
             row.ID: f"{row.Nombre} ({row.RUT})" for row in clientes_editar.itertuples()
         }
+        limpiar_seleccion_invalida("cliente_id_editar", list(opciones_editar.keys()))
         cliente_id_editar = st.selectbox(
             "Elegí un cliente",
             options=list(opciones_editar.keys()),
@@ -387,14 +445,13 @@ with tab_clientes:
                 telefono_e = st.text_input("Teléfono", value=datos["Telefono"])
             with col2:
                 email_e = st.text_input("Email", value=datos["Email"])
-                fecha_nacimiento_e = st.date_input(
-                    "Fecha de nacimiento",
-                    value=parsear_fecha(datos["FechaNacimiento"]),
-                    min_value=date(1900, 1, 1),
-                    max_value=date.today(),
-                    format="DD/MM/YYYY",
-                )
                 direccion_e = st.text_input("Dirección", value=datos["Direccion"])
+
+            st.write("Fecha de nacimiento")
+            fecha_nacimiento_e = selector_fecha_nacimiento(
+                f"nac_editar_{cliente_id_editar}",
+                valor_actual=parsear_fecha(datos["FechaNacimiento"]),
+            )
             notas_e = st.text_area("Notas", value=datos["Notas"])
 
             if st.form_submit_button("Guardar cambios"):
@@ -487,6 +544,7 @@ with tab_registro:
 
         col1, col2 = st.columns(2)
         with col1:
+            limpiar_seleccion_invalida("cliente_id_sel", list(opciones_cliente.keys()))
             cliente_id_sel = st.selectbox(
                 "Cliente",
                 options=list(opciones_cliente.keys()),
@@ -519,7 +577,7 @@ with tab_registro:
                 st.session_state.pop("observaciones_input", None)
                 st.session_state.mensaje_guardado = (
                     f"Cita guardada: {opciones_cliente[cliente_id_sel]} — "
-                    f"${total_calculado:,.0f}"
+                    f"{formatear_clp(total_calculado)}"
                 )
                 st.rerun()
 
@@ -544,12 +602,11 @@ with tab_resumen:
         citas_agrupadas["RUT"] = citas_agrupadas["RUT"].fillna("")
 
         st.subheader("Detalle de citas")
-        st.dataframe(
-            citas_agrupadas[["Fecha", "Nombre", "RUT", "Tratamientos", "Total", "Observaciones"]]
-            .sort_values("Fecha", ascending=False),
-            use_container_width=True,
-            hide_index=True,
-        )
+        detalle_mostrar = citas_agrupadas[
+            ["Fecha", "Nombre", "RUT", "Tratamientos", "Total", "Observaciones"]
+        ].sort_values("Fecha", ascending=False).copy()
+        detalle_mostrar["Total"] = detalle_mostrar["Total"].apply(formatear_clp)
+        st.dataframe(detalle_mostrar, use_container_width=True, hide_index=True)
 
         st.divider()
 
@@ -564,7 +621,11 @@ with tab_resumen:
                 .reset_index()
                 .drop(columns=["ClienteID"])
             )
-            st.dataframe(resumen_cliente, use_container_width=True, hide_index=True)
+            resumen_cliente_mostrar = resumen_cliente.copy()
+            resumen_cliente_mostrar["Total_gastado"] = resumen_cliente_mostrar[
+                "Total_gastado"
+            ].apply(formatear_clp)
+            st.dataframe(resumen_cliente_mostrar, use_container_width=True, hide_index=True)
 
         with col2:
             st.subheader("Ingresos por día")
@@ -586,7 +647,7 @@ with tab_resumen:
             st.bar_chart(ingresos)
 
         st.divider()
-        st.metric("Ingreso total registrado", f"${citas['Precio'].sum():,.0f}")
+        st.metric("Ingreso total registrado", formatear_clp(citas["Precio"].sum()))
 
 # --- TAB 4: ficha de cliente (historial de citas por cliente) ---
 with tab_ficha_cliente:
@@ -603,6 +664,7 @@ with tab_ficha_cliente:
         opciones_cliente = {
             row.ID: f"{row.Nombre} ({row.RUT})" for row in clientes.itertuples()
         }
+        limpiar_seleccion_invalida("cliente_id_ver", list(opciones_cliente.keys()))
         cliente_id_ver = st.selectbox(
             "Cliente",
             options=list(opciones_cliente.keys()),
@@ -642,28 +704,35 @@ with tab_ficha_cliente:
 
             col_a, col_b = st.columns(2)
             col_a.metric("Visitas", len(citas_cliente_agrupadas))
-            col_b.metric("Total gastado", f"${citas_cliente['Precio'].sum():,.0f}")
+            col_b.metric("Total gastado", formatear_clp(citas_cliente["Precio"].sum()))
 
             opciones_citas = {
                 row.ID: (
                     f"{row.Fecha.strftime('%d/%m/%Y') if pd.notna(row.Fecha) else '(sin fecha)'}"
-                    f" — ${row.Total:,.0f}"
+                    f" — {formatear_clp(row.Total)}"
                 )
                 for row in citas_cliente_agrupadas.itertuples()
             }
+            limpiar_seleccion_invalida(
+                f"cita_sel_ficha_{cliente_id_ver}", list(opciones_citas.keys())
+            )
             cita_sel = st.selectbox(
                 "Elegí una cita para ver el detalle",
                 options=list(opciones_citas.keys()),
                 format_func=lambda cid: opciones_citas[cid],
-                key="cita_sel_ficha",
+                key=f"cita_sel_ficha_{cliente_id_ver}",
             )
 
             tabla_tratamientos = (
                 citas_cliente.loc[citas_cliente["ID"] == cita_sel, ["Tratamiento", "Precio"]]
                 .reset_index(drop=True)
             )
-            st.dataframe(tabla_tratamientos, use_container_width=True, hide_index=True)
-            st.metric("Total de esta cita", f"${tabla_tratamientos['Precio'].sum():,.0f}")
+            tabla_tratamientos_mostrar = tabla_tratamientos.copy()
+            tabla_tratamientos_mostrar["Precio"] = tabla_tratamientos_mostrar["Precio"].apply(
+                formatear_clp
+            )
+            st.dataframe(tabla_tratamientos_mostrar, use_container_width=True, hide_index=True)
+            st.metric("Total de esta cita", formatear_clp(tabla_tratamientos["Precio"].sum()))
 
             obs_actual = citas_cliente_agrupadas.loc[
                 citas_cliente_agrupadas["ID"] == cita_sel, "Observaciones"
