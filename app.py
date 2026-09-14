@@ -19,10 +19,10 @@ SCOPES = [
 ID_HOJA = "117m17ax3UznyF3iLpEBWpIbDvhYUtLb8bTMqdwRm7FU"   # ID de tu Google Sheet (de la URL)
 
 TAB_CATALOGO = "Catalogo"   # columnas: Tratamiento | Precio
-TAB_CITAS = "Citas"         # columnas: ID | Fecha | ClienteID | Tratamientos | Total
+TAB_CITAS = "Citas"         # columnas: ID | Fecha | ClienteID | Tratamiento | Precio (una fila por tratamiento, mismo ID agrupa la cita)
 TAB_CLIENTES = "Clientes"   # columnas: ID | RUT | Nombre | Telefono | Email | FechaNacimiento | Direccion | FechaRegistro | Notas
 
-CITAS_COLUMNAS = ["ID", "Fecha", "ClienteID", "Tratamientos", "Total"]
+CITAS_COLUMNAS = ["ID", "Fecha", "ClienteID", "Tratamiento", "Precio"]
 CLIENTES_COLUMNAS = [
     "ID", "RUT", "Nombre", "Telefono", "Email",
     "FechaNacimiento", "Direccion", "FechaRegistro", "Notas",
@@ -80,14 +80,28 @@ def cargar_clientes():
 
 @st.cache_data(ttl=30)
 def cargar_citas():
+    """Cada fila es UN tratamiento. Varias filas comparten el mismo ID = una cita."""
     ws = get_worksheet(TAB_CITAS)
     data = ws.get_all_records(value_render_option="UNFORMATTED_VALUE")
     df = pd.DataFrame(data)
     if df.empty:
         return pd.DataFrame(columns=CITAS_COLUMNAS)
     df["Fecha"] = pd.to_datetime(df["Fecha"], errors="coerce", dayfirst=True)
-    df["Total"] = pd.to_numeric(df["Total"], errors="coerce").fillna(0)
+    df["Precio"] = pd.to_numeric(df["Precio"], errors="coerce").fillna(0)
     return df
+
+
+def agrupar_citas(citas):
+    """Colapsa las filas por tratamiento a una fila por cita (mismo ID)."""
+    if citas.empty:
+        return citas.assign(Tratamientos="", Total=0.0)
+    return (
+        citas.groupby(["ID", "Fecha", "ClienteID"], as_index=False)
+        .agg(
+            Tratamientos=("Tratamiento", lambda x: ", ".join(x)),
+            Total=("Precio", "sum"),
+        )
+    )
 
 
 def guardar_cliente(nombre, rut, telefono, email, fecha_nacimiento, direccion, notas):
@@ -106,15 +120,17 @@ def guardar_cliente(nombre, rut, telefono, email, fecha_nacimiento, direccion, n
     ])
 
 
-def guardar_cita(fecha, cliente_id, tratamientos, total):
+def guardar_cita(fecha, cliente_id, items):
+    """items: lista de {"Tratamiento": ..., "Precio": ...}. Genera un solo ID de cita
+    y guarda una fila por tratamiento, todas con ese mismo ID para poder agruparlas."""
     ws = get_worksheet(TAB_CITAS)
-    ws.append_row([
-        uuid.uuid4().hex[:8].upper(),
-        fecha.strftime("%d/%m/%Y"),
-        cliente_id,
-        ", ".join(tratamientos),
-        float(total),
-    ])
+    cita_id = uuid.uuid4().hex[:8].upper()
+    fecha_str = fecha.strftime("%d/%m/%Y")
+    filas = [
+        [cita_id, fecha_str, cliente_id, item["Tratamiento"], float(item["Precio"])]
+        for item in items
+    ]
+    ws.append_rows(filas, value_input_option="RAW")
 
 
 # -----------------------------
@@ -277,8 +293,7 @@ with tab_registro:
             st.metric("Total de la cita", f"${total_calculado:,.0f}")
 
             if st.button("✅ Guardar cita", type="primary"):
-                tratamientos = [item["Tratamiento"] for item in st.session_state.carrito]
-                guardar_cita(fecha, cliente_id_sel, tratamientos, total_calculado)
+                guardar_cita(fecha, cliente_id_sel, st.session_state.carrito)
                 st.cache_data.clear()
                 st.session_state.carrito = []
                 st.session_state.mensaje_guardado = (
@@ -299,17 +314,17 @@ with tab_resumen:
     if citas.empty:
         st.info("Todavía no hay citas registradas.")
     else:
-        citas_detalle = citas.merge(
+        citas_agrupadas = agrupar_citas(citas).merge(
             clientes[["ID", "Nombre", "RUT"]].rename(columns={"ID": "ClienteID"}),
             on="ClienteID",
             how="left",
         )
-        citas_detalle["Nombre"] = citas_detalle["Nombre"].fillna("(cliente desconocido)")
-        citas_detalle["RUT"] = citas_detalle["RUT"].fillna("")
+        citas_agrupadas["Nombre"] = citas_agrupadas["Nombre"].fillna("(cliente desconocido)")
+        citas_agrupadas["RUT"] = citas_agrupadas["RUT"].fillna("")
 
         st.subheader("Detalle de citas")
         st.dataframe(
-            citas_detalle[["Fecha", "Nombre", "RUT", "Tratamientos", "Total"]]
+            citas_agrupadas[["Fecha", "Nombre", "RUT", "Tratamientos", "Total"]]
             .sort_values("Fecha", ascending=False),
             use_container_width=True,
             hide_index=True,
@@ -322,8 +337,8 @@ with tab_resumen:
         with col1:
             st.subheader("Resumen por cliente")
             resumen_cliente = (
-                citas_detalle.groupby(["ClienteID", "Nombre"])
-                .agg(Visitas=("ClienteID", "count"), Total_gastado=("Total", "sum"))
+                citas_agrupadas.groupby(["ClienteID", "Nombre"])
+                .agg(Visitas=("ID", "count"), Total_gastado=("Total", "sum"))
                 .sort_values("Total_gastado", ascending=False)
                 .reset_index()
                 .drop(columns=["ClienteID"])
@@ -331,24 +346,31 @@ with tab_resumen:
             st.dataframe(resumen_cliente, use_container_width=True, hide_index=True)
 
         with col2:
-            st.subheader("Ingresos por período")
-            periodo = st.radio("Agrupar por", ["Día", "Semana", "Mes"], horizontal=True)
-            freq_map = {"Día": "D", "Semana": "W", "Mes": "ME"}
-            ingresos = (
-                citas.set_index("Fecha")
-                .resample(freq_map[periodo])["Total"]
-                .sum()
-            )
+            st.subheader("Ingresos por día")
+            opciones_rango = {
+                "Últimos 7 días": 7,
+                "Últimos 14 días": 14,
+                "Últimos 30 días": 30,
+                "Todo el historial": None,
+            }
+            rango_sel = st.selectbox("Mostrar", list(opciones_rango.keys()))
+            dias = opciones_rango[rango_sel]
+
+            citas_grafico = citas
+            if dias is not None:
+                fecha_limite = pd.Timestamp(date.today()) - pd.Timedelta(days=dias - 1)
+                citas_grafico = citas[citas["Fecha"] >= fecha_limite]
+
+            ingresos = citas_grafico.set_index("Fecha").resample("D")["Precio"].sum()
             st.bar_chart(ingresos)
 
         st.divider()
-        st.metric("Ingreso total registrado", f"${citas['Total'].sum():,.0f}")
+        st.metric("Ingreso total registrado", f"${citas['Precio'].sum():,.0f}")
 
 # --- TAB 4: ficha de cliente (historial de citas por cliente) ---
 with tab_ficha_cliente:
     clientes = cargar_clientes()
     citas = cargar_citas()
-    catalogo = cargar_catalogo()
 
     if clientes.empty:
         st.info(
@@ -392,18 +414,20 @@ with tab_ficha_cliente:
         if citas_cliente.empty:
             st.info("Este cliente todavía no tiene citas registradas.")
         else:
-            citas_cliente = citas_cliente.sort_values("Fecha", ascending=False)
+            citas_cliente_agrupadas = agrupar_citas(citas_cliente).sort_values(
+                "Fecha", ascending=False
+            )
 
             col_a, col_b = st.columns(2)
-            col_a.metric("Visitas", len(citas_cliente))
-            col_b.metric("Total gastado", f"${citas_cliente['Total'].sum():,.0f}")
+            col_a.metric("Visitas", len(citas_cliente_agrupadas))
+            col_b.metric("Total gastado", f"${citas_cliente['Precio'].sum():,.0f}")
 
             opciones_citas = {
                 row.ID: (
                     f"{row.Fecha.strftime('%d/%m/%Y') if pd.notna(row.Fecha) else '(sin fecha)'}"
                     f" — ${row.Total:,.0f}"
                 )
-                for row in citas_cliente.itertuples()
+                for row in citas_cliente_agrupadas.itertuples()
             }
             cita_sel = st.selectbox(
                 "Elegí una cita para ver el detalle",
@@ -412,19 +436,9 @@ with tab_ficha_cliente:
                 key="cita_sel_ficha",
             )
 
-            fila_cita = citas_cliente.loc[citas_cliente["ID"] == cita_sel].iloc[0]
-
-            precios_catalogo = catalogo.set_index("Tratamiento")["Precio"]
-            nombres_tratamientos = [
-                t.strip() for t in str(fila_cita["Tratamientos"]).split(",") if t.strip()
-            ]
-            tabla_tratamientos = pd.DataFrame([
-                {
-                    "Tratamiento": nombre,
-                    "Precio": precios_catalogo.get(nombre, None),
-                }
-                for nombre in nombres_tratamientos
-            ])
-
+            tabla_tratamientos = (
+                citas_cliente.loc[citas_cliente["ID"] == cita_sel, ["Tratamiento", "Precio"]]
+                .reset_index(drop=True)
+            )
             st.dataframe(tabla_tratamientos, use_container_width=True, hide_index=True)
-            st.metric("Total de esta cita", f"${fila_cita['Total']:,.0f}")
+            st.metric("Total de esta cita", f"${tabla_tratamientos['Precio'].sum():,.0f}")
